@@ -1,0 +1,13 @@
+{
+  "name": "frc-betting-bot",
+  "version": "1.0.0",
+  "description": "FRC alliance betting bot for Discord",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.0.0",
+    "dotenv": "^17.4.0"
+  }
+}
