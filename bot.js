@@ -20,7 +20,7 @@ function loadData() {
     if (typeof user.points !== 'number' || Number.isNaN(user.points)) {
       user.points = STARTING_POINTS;
     }
-    if (user.points < MIN_POINTS) {
+    if (user.points < 0) {
       user.points = MIN_POINTS;
     }
   }
@@ -41,11 +41,20 @@ function getUser(data, id, username) {
     data.users[id] = { username, points: STARTING_POINTS };
   }
 
-  if (data.users[id].points < MIN_POINTS) {
-    data.users[id].points = MIN_POINTS;
+  if (username) {
+    data.users[id].username = username;
   }
 
   return data.users[id];
+}
+
+function getDisplayName(interaction, targetUser = interaction.user) {
+  if (targetUser.id === interaction.user.id) {
+    return interaction.member?.displayName || targetUser.globalName || targetUser.username;
+  }
+
+  const guildMember = interaction.guild?.members.cache.get(targetUser.id);
+  return guildMember?.displayName || targetUser.globalName || targetUser.username;
 }
 
 // ── Slash command definitions ─────────────────────────────────────────────────
@@ -179,6 +188,7 @@ client.on('interactionCreate', async (interaction) => {
   const data = loadData();
   const { commandName, user } = interaction;
   const member = interaction.member;
+  const displayName = getDisplayName(interaction);
 
   // Host = anyone with "Manage Server" permission or the "Host" role
   const isHost =
@@ -290,7 +300,11 @@ client.on('interactionCreate', async (interaction) => {
         const profit = share - b.amount;
         payoutLines.push(`✅ **${b.username}** — bet ${b.amount}, won **+${profit}** (total ${share} pts back)`);
       }
-      for (const [, b] of loserBets) {
+      for (const [uid, b] of loserBets) {
+        const loserData = getUser(data, uid, b.username);
+        if (loserData.points < MIN_POINTS) {
+          loserData.points = MIN_POINTS;
+        }
         payoutLines.push(`❌ **${b.username}** — lost ${b.amount} pts`);
       }
     }
@@ -331,22 +345,15 @@ client.on('interactionCreate', async (interaction) => {
     // If betting for someone else, use a fake ID based on their name
     const betAs = targetName
       ? { id: `manual_${targetName.toLowerCase().replace(/\s+/g, '_')}`, username: targetName }
-      : { id: user.id, username: user.username };
+      : { id: user.id, username: displayName };
 
     const userData = getUser(data, betAs.id, betAs.username);
     const existingBet = data.round.bets[betAs.id];
-    const availableToBet = userData.points + (existingBet ? existingBet.amount : 0) - MIN_POINTS;
-
-    if (availableToBet <= 0) {
-      return interaction.reply({
-        content: `❌ You need to keep at least **${MIN_POINTS} pts**. You can't place a bet right now.`,
-        ephemeral: true,
-      });
-    }
+    const availableToBet = userData.points + (existingBet ? existingBet.amount : 0);
 
     if (amount > availableToBet) {
       return interaction.reply({
-        content: `❌ You must keep at least **${MIN_POINTS} pts**. Your max bet right now is **${availableToBet} pts**.`,
+        content: `❌ You only have **${availableToBet} pts** available to bet.`,
         ephemeral: true,
       });
     }
@@ -368,10 +375,10 @@ client.on('interactionCreate', async (interaction) => {
 
   // ── /points ─────────────────────────────────────────────────────────────────
   if (commandName === 'points') {
-    const userData = getUser(data, user.id, user.username);
+    const userData = getUser(data, user.id, displayName);
     saveData(data);
     return interaction.reply({
-      content: `💰 **${user.username}** has **${userData.points} pts**`,
+      content: `💰 **${displayName}** has **${userData.points} pts**`,
       ephemeral: true,
     });
   }
@@ -433,14 +440,15 @@ client.on('interactionCreate', async (interaction) => {
     }
     const target = interaction.options.getUser('user');
     const amount = interaction.options.getInteger('amount');
-    const targetData = getUser(data, target.id, target.username);
+    const targetName = getDisplayName(interaction, target);
+    const targetData = getUser(data, target.id, targetName);
     targetData.points += amount;
     if (targetData.points < MIN_POINTS) {
       targetData.points = MIN_POINTS;
     }
     saveData(data);
     return interaction.reply({
-      content: `✅ Gave **${amount} pts** to **${target.username}**. New balance: ${targetData.points} pts`,
+      content: `✅ Gave **${amount} pts** to **${targetName}**. New balance: ${targetData.points} pts`,
     });
   }
 
@@ -450,11 +458,12 @@ client.on('interactionCreate', async (interaction) => {
       return interaction.reply({ content: '❌ Hosts only.', ephemeral: true });
     }
     const target = interaction.options.getUser('user');
-    const targetData = getUser(data, target.id, target.username);
+    const targetName = getDisplayName(interaction, target);
+    const targetData = getUser(data, target.id, targetName);
     targetData.points = STARTING_POINTS;
     saveData(data);
     return interaction.reply({
-      content: `🔄 Reset **${target.username}** to ${STARTING_POINTS} pts`,
+      content: `🔄 Reset **${targetName}** to ${STARTING_POINTS} pts`,
     });
   }
 });
