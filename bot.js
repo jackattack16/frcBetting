@@ -7,13 +7,29 @@ const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const DATA_FILE = './data.json';
 const STARTING_POINTS = 1000;
+const MIN_POINTS = 50;
 
 // ── Data helpers ──────────────────────────────────────────────────────────────
 function loadData() {
   if (!fs.existsSync(DATA_FILE)) {
     fs.writeFileSync(DATA_FILE, JSON.stringify({ users: {}, round: null }));
   }
-  return JSON.parse(fs.readFileSync(DATA_FILE));
+  const data = JSON.parse(fs.readFileSync(DATA_FILE));
+
+  for (const user of Object.values(data.users)) {
+    if (typeof user.points !== 'number' || Number.isNaN(user.points)) {
+      user.points = STARTING_POINTS;
+    }
+    if (user.points < MIN_POINTS) {
+      user.points = MIN_POINTS;
+    }
+  }
+
+  if (!data.round) {
+    data.round = null;
+  }
+
+  return data;
 }
 
 function saveData(data) {
@@ -24,6 +40,11 @@ function getUser(data, id, username) {
   if (!data.users[id]) {
     data.users[id] = { username, points: STARTING_POINTS };
   }
+
+  if (data.users[id].points < MIN_POINTS) {
+    data.users[id].points = MIN_POINTS;
+  }
+
   return data.users[id];
 }
 
@@ -40,6 +61,10 @@ const commands = [
         required: false,
       },
     ],
+  },
+  {
+    name: 'resetgame',
+    description: 'Host only: Reset all users and clear the current round',
   },
   {
     name: 'closebetting',
@@ -182,6 +207,23 @@ client.on('interactionCreate', async (interaction) => {
     return interaction.reply({ embeds: [embed] });
   }
 
+  // ── /resetgame ──────────────────────────────────────────────────────────────
+  if (commandName === 'resetgame') {
+    if (!isHost) {
+      return interaction.reply({ content: '❌ Hosts only.', ephemeral: true });
+    }
+
+    for (const userData of Object.values(data.users)) {
+      userData.points = STARTING_POINTS;
+    }
+    data.round = null;
+    saveData(data);
+
+    return interaction.reply({
+      content: `🔄 Game reset. All users are back to ${STARTING_POINTS} pts and the current round was cleared.`,
+    });
+  }
+
   // ── /closebetting ───────────────────────────────────────────────────────────
   if (commandName === 'closebetting') {
     if (!isHost) {
@@ -294,18 +336,26 @@ client.on('interactionCreate', async (interaction) => {
       : { id: user.id, username: user.username };
 
     const userData = getUser(data, betAs.id, betAs.username);
+    const existingBet = data.round.bets[betAs.id];
+    const availableToBet = userData.points + (existingBet ? existingBet.amount : 0) - MIN_POINTS;
 
-    if (userData.points < amount) {
+    if (availableToBet <= 0) {
       return interaction.reply({
-        content: `❌ You only have **${userData.points} pts**. Can't bet ${amount}.`,
+        content: `❌ You need to keep at least **${MIN_POINTS} pts**. You can't place a bet right now.`,
+        ephemeral: true,
+      });
+    }
+
+    if (amount > availableToBet) {
+      return interaction.reply({
+        content: `❌ You must keep at least **${MIN_POINTS} pts**. Your max bet right now is **${availableToBet} pts**.`,
         ephemeral: true,
       });
     }
 
     // Replace existing bet if they already bet this round
-    if (data.round.bets[betAs.id]) {
-      const old = data.round.bets[betAs.id];
-      userData.points += old.amount;
+    if (existingBet) {
+      userData.points += existingBet.amount;
     }
 
     userData.points -= amount;
@@ -387,6 +437,9 @@ client.on('interactionCreate', async (interaction) => {
     const amount = interaction.options.getInteger('amount');
     const targetData = getUser(data, target.id, target.username);
     targetData.points += amount;
+    if (targetData.points < MIN_POINTS) {
+      targetData.points = MIN_POINTS;
+    }
     saveData(data);
     return interaction.reply({
       content: `✅ Gave **${amount} pts** to **${target.username}**. New balance: ${targetData.points} pts`,
