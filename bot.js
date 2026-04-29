@@ -213,14 +213,12 @@ client.on('interactionCreate', async (interaction) => {
       return interaction.reply({ content: '❌ Hosts only.', ephemeral: true });
     }
 
-    for (const userData of Object.values(data.users)) {
-      userData.points = STARTING_POINTS;
-    }
+    data.users = {};
     data.round = null;
     saveData(data);
 
     return interaction.reply({
-      content: `🔄 Game reset. All users are back to ${STARTING_POINTS} pts and the current round was cleared.`,
+      content: '🔄 Game reset. All saved users and the current round were completely cleared.',
     });
   }
 
