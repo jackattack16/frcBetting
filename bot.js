@@ -402,7 +402,7 @@ client.on('interactionCreate', async (interaction) => {
       .setTitle('🏆 Leaderboard')
       .setDescription(lines.join('\n'));
 
-    return interaction.reply({ embeds: [embed] });
+    return interaction.reply({ embeds: [embed], ephemeral: true });
   }
 
   // ── /currentbets ────────────────────────────────────────────────────────────
@@ -430,7 +430,7 @@ client.on('interactionCreate', async (interaction) => {
         { name: `🔵 Blue (${blueTotal} pts)`, value: fmt(blueBets), inline: true },
       );
 
-    return interaction.reply({ embeds: [embed] });
+    return interaction.reply({ embeds: [embed], ephemeral: true });
   }
 
   // ── /givepoints ─────────────────────────────────────────────────────────────
