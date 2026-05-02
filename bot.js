@@ -275,6 +275,7 @@ client.on('interactionCreate', async (interaction) => {
 
     const winner = interaction.options.getString('alliance');
     const bets = data.round.bets;
+    const nonBettingUsers = Object.entries(data.users).filter(([uid]) => !bets[uid]);
 
     const winnerBets = Object.entries(bets).filter(([, b]) => b.alliance === winner);
     const loserBets = Object.entries(bets).filter(([, b]) => b.alliance !== winner);
@@ -307,6 +308,14 @@ client.on('interactionCreate', async (interaction) => {
         }
         payoutLines.push(`❌ **${b.username}** — lost ${b.amount} pts`);
       }
+    }
+
+    for (const [, userData] of nonBettingUsers) {
+      userData.points -= 50;
+      if (userData.points < MIN_POINTS) {
+        userData.points = MIN_POINTS;
+      }
+      payoutLines.push(`⚠️ **${userData.username}** — skipped the round and lost 50 pts`);
     }
 
     data.round = null;
