@@ -57,6 +57,23 @@ function getDisplayName(interaction, targetUser = interaction.user) {
   return guildMember?.displayName || targetUser.globalName || targetUser.username;
 }
 
+function getManualUserId(name) {
+  return `manual_${name.toLowerCase().replace(/\s+/g, '_')}`;
+}
+
+function getBetTarget(interaction, isHost) {
+  const targetName = interaction.options.getString('for');
+  if (targetName && !isHost) {
+    return { error: '❌ Only hosts can bet on behalf of others.' };
+  }
+
+  if (targetName) {
+    return { id: getManualUserId(targetName), username: targetName };
+  }
+
+  return { id: interaction.user.id, username: getDisplayName(interaction) };
+}
+
 // ── Slash command definitions ─────────────────────────────────────────────────
 const commands = [
   {
@@ -124,6 +141,28 @@ const commands = [
     ],
   },
   {
+    name: 'allin',
+    description: 'Bet all available points on an alliance',
+    options: [
+      {
+        name: 'alliance',
+        description: 'Alliance to bet on',
+        type: 3,
+        required: true,
+        choices: [
+          { name: 'Red', value: 'red' },
+          { name: 'Blue', value: 'blue' },
+        ],
+      },
+      {
+        name: 'for',
+        description: 'Host only: name to place bet on behalf of (for non-Discord users)',
+        type: 3,
+        required: false,
+      },
+    ],
+  },
+  {
     name: 'points',
     description: 'Check your current point balance',
   },
@@ -164,6 +203,28 @@ const commands = [
   {
     name: 'currentbets',
     description: 'Show all bets placed in the current round',
+  },
+  {
+    name: 'clearbets',
+    description: 'Host only: Clear all bets for the current round',
+  },
+  {
+    name: 'clearuserbet',
+    description: 'Host only: Clear one user bet for the current round',
+    options: [
+      {
+        name: 'user',
+        description: 'Discord user whose bet should be cleared',
+        type: 6,
+        required: false,
+      },
+      {
+        name: 'name',
+        description: 'Manual bettor name to clear',
+        type: 3,
+        required: false,
+      },
+    ],
   },
 ];
 
@@ -339,27 +400,21 @@ client.on('interactionCreate', async (interaction) => {
       return interaction.reply({ content: '❌ Betting is not open right now.', ephemeral: true });
     }
 
-    const userData = getUser(data, betAs.id, betAs.username);
-    const existingBet = data.round.bets[betAs.id];
-    const availableToBet = userData.points + (existingBet ? existingBet.amount : 0);
     const alliance = interaction.options.getString('alliance');
     const amount = interaction.options.getInteger('amount');
+    const betTarget = getBetTarget(interaction, isHost);
+
+    if (betTarget.error) {
+      return interaction.reply({ content: betTarget.error, ephemeral: true });
+    }
+
+    const userData = getUser(data, betTarget.id, betTarget.username);
+    const existingBet = data.round.bets[betTarget.id];
+    const availableToBet = userData.points + (existingBet ? existingBet.amount : 0);
 
     if (amount <= 100 && !(availableToBet <= 100)) {
       return interaction.reply({ content: '❌ Bet amount must be greater than 100.', ephemeral: true });
     }
-
-    const targetName = interaction.options.getString('for');
-    if (targetName && !isHost) {
-      return interaction.reply({ content: '❌ Only hosts can bet on behalf of others.', ephemeral: true });
-    }
-
-    // If betting for someone else, use a fake ID based on their name
-    const betAs = targetName
-      ? { id: `manual_${targetName.toLowerCase().replace(/\s+/g, '_')}`, username: targetName }
-      : { id: user.id, username: displayName };
-
-    
 
     if (amount > availableToBet) {
       return interaction.reply({
@@ -374,12 +429,50 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     userData.points -= amount;
-    data.round.bets[betAs.id] = { username: betAs.username, alliance, amount };
+    data.round.bets[betTarget.id] = { username: betTarget.username, alliance, amount };
     saveData(data);
 
     const emoji = alliance === 'red' ? '🔴' : '🔵';
     return interaction.reply({
-      content: `${emoji} **${betAs.username}** bet **${amount} pts** on **${alliance.toUpperCase()}**. Balance: ${userData.points} pts`,
+      content: `${emoji} **${betTarget.username}** bet **${amount} pts** on **${alliance.toUpperCase()}**. Balance: ${userData.points} pts`,
+    });
+  }
+
+  // ── /allin ──────────────────────────────────────────────────────────────────
+  if (commandName === 'allin') {
+    if (!data.round || !data.round.open) {
+      return interaction.reply({ content: '❌ Betting is not open right now.', ephemeral: true });
+    }
+
+    const alliance = interaction.options.getString('alliance');
+    const betTarget = getBetTarget(interaction, isHost);
+
+    if (betTarget.error) {
+      return interaction.reply({ content: betTarget.error, ephemeral: true });
+    }
+
+    const userData = getUser(data, betTarget.id, betTarget.username);
+    const existingBet = data.round.bets[betTarget.id];
+    const availableToBet = userData.points + (existingBet ? existingBet.amount : 0);
+
+    if (availableToBet <= 0) {
+      return interaction.reply({
+        content: '❌ There are no points available to bet all in.',
+        ephemeral: true,
+      });
+    }
+
+    if (existingBet) {
+      userData.points += existingBet.amount;
+    }
+
+    userData.points -= availableToBet;
+    data.round.bets[betTarget.id] = { username: betTarget.username, alliance, amount: availableToBet };
+    saveData(data);
+
+    const emoji = alliance === 'red' ? '🔴' : '🔵';
+    return interaction.reply({
+      content: `${emoji} **${betTarget.username}** went **ALL IN** with **${availableToBet} pts** on **${alliance.toUpperCase()}**. Balance: ${userData.points} pts`,
     });
   }
 
@@ -441,6 +534,89 @@ client.on('interactionCreate', async (interaction) => {
       );
 
     return interaction.reply({ embeds: [embed], ephemeral: true });
+  }
+
+  // ── /clearbets ──────────────────────────────────────────────────────────────
+  if (commandName === 'clearbets') {
+    if (!isHost) {
+      return interaction.reply({ content: '❌ Hosts only.', ephemeral: true });
+    }
+    if (!data.round) {
+      return interaction.reply({ content: '❌ No active round.', ephemeral: true });
+    }
+
+    const bets = Object.entries(data.round.bets);
+    if (bets.length === 0) {
+      return interaction.reply({ content: '❌ There are no bets to clear.', ephemeral: true });
+    }
+
+    for (const [uid, bet] of bets) {
+      getUser(data, uid, bet.username).points += bet.amount;
+    }
+
+    data.round.bets = {};
+    saveData(data);
+
+    return interaction.reply({
+      content: `🧹 Cleared **${bets.length}** bet(s) for **${data.round.label}** and refunded all points.`,
+    });
+  }
+
+  // ── /clearuserbet ───────────────────────────────────────────────────────────
+  if (commandName === 'clearuserbet') {
+    if (!isHost) {
+      return interaction.reply({ content: '❌ Hosts only.', ephemeral: true });
+    }
+    if (!data.round) {
+      return interaction.reply({ content: '❌ No active round.', ephemeral: true });
+    }
+
+    const targetUser = interaction.options.getUser('user');
+    const manualName = interaction.options.getString('name');
+
+    if (!targetUser && !manualName) {
+      return interaction.reply({
+        content: '❌ Provide either a Discord user or a manual name.',
+        ephemeral: true,
+      });
+    }
+
+    let betId;
+    let label;
+
+    if (targetUser) {
+      betId = targetUser.id;
+      label = getDisplayName(interaction, targetUser);
+    } else {
+      betId = getManualUserId(manualName);
+      label = manualName;
+    }
+
+    let bet = data.round.bets[betId];
+    if (!bet && manualName) {
+      const fallbackEntry = Object.entries(data.round.bets).find(([, existingBet]) =>
+        existingBet.username.toLowerCase() === manualName.toLowerCase()
+      );
+      if (fallbackEntry) {
+        [betId, bet] = fallbackEntry;
+        label = bet.username;
+      }
+    }
+
+    if (!bet) {
+      return interaction.reply({
+        content: `❌ No current bet found for **${label}**.`,
+        ephemeral: true,
+      });
+    }
+
+    getUser(data, betId, bet.username).points += bet.amount;
+    delete data.round.bets[betId];
+    saveData(data);
+
+    return interaction.reply({
+      content: `🧹 Cleared **${label}**'s bet of **${bet.amount} pts** and refunded the points.`,
+    });
   }
 
   // ── /givepoints ─────────────────────────────────────────────────────────────
