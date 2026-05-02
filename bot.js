@@ -97,6 +97,10 @@ const commands = [
     description: 'Host only: Close betting (no more bets accepted)',
   },
   {
+    name: 'reopenbetting',
+    description: 'Host only: Reopen a closed betting round',
+  },
+  {
     name: 'resolve',
     description: 'Host only: Resolve the round and pay out winners',
     options: [
@@ -178,13 +182,19 @@ const commands = [
         name: 'user',
         description: 'User to give points to',
         type: 6, // USER
-        required: true,
+        required: false,
       },
       {
         name: 'amount',
         description: 'Amount of points',
         type: 4,
         required: true,
+      },
+      {
+        name: 'name',
+        description: 'Manual name to give points to',
+        type: 3,
+        required: false,
       },
     ],
   },
@@ -321,6 +331,29 @@ client.on('interactionCreate', async (interaction) => {
         { name: '🔵 Blue', value: `${blueTotal} pts`, inline: true },
       )
       .setFooter({ text: 'Waiting for match result...' });
+
+    return interaction.reply({ embeds: [embed] });
+  }
+
+  // ── /reopenbetting ──────────────────────────────────────────────────────────
+  if (commandName === 'reopenbetting') {
+    if (!isHost) {
+      return interaction.reply({ content: '❌ Hosts only.', ephemeral: true });
+    }
+    if (!data.round) {
+      return interaction.reply({ content: '❌ No active round to reopen.', ephemeral: true });
+    }
+    if (data.round.open) {
+      return interaction.reply({ content: '❌ Betting is already open.', ephemeral: true });
+    }
+
+    data.round.open = true;
+    saveData(data);
+
+    const embed = new EmbedBuilder()
+      .setColor(0x00ff88)
+      .setTitle('🟢 Betting is REOPENED')
+      .setDescription(`**${data.round.label}**\nBets can be placed again for this round.`);
 
     return interaction.reply({ embeds: [embed] });
   }
@@ -544,6 +577,9 @@ client.on('interactionCreate', async (interaction) => {
     if (!data.round) {
       return interaction.reply({ content: '❌ No active round.', ephemeral: true });
     }
+    if (data.round.open) {
+      return interaction.reply({ content: '❌ Close betting before clearing all bets for this round.', ephemeral: true });
+    }
 
     const bets = Object.entries(data.round.bets);
     if (bets.length === 0) {
@@ -625,9 +661,18 @@ client.on('interactionCreate', async (interaction) => {
       return interaction.reply({ content: '❌ Hosts only.', ephemeral: true });
     }
     const target = interaction.options.getUser('user');
+    const manualName = interaction.options.getString('name');
     const amount = interaction.options.getInteger('amount');
-    const targetName = getDisplayName(interaction, target);
-    const targetData = getUser(data, target.id, targetName);
+    if (!target && !manualName) {
+      return interaction.reply({
+        content: '❌ Provide either a Discord user or a manual name.',
+        ephemeral: true,
+      });
+    }
+
+    const targetId = target ? target.id : getManualUserId(manualName);
+    const targetName = target ? getDisplayName(interaction, target) : manualName;
+    const targetData = getUser(data, targetId, targetName);
     targetData.points += amount;
     if (targetData.points < MIN_POINTS) {
       targetData.points = MIN_POINTS;
