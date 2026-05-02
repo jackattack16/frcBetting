@@ -330,11 +330,14 @@ client.on('interactionCreate', async (interaction) => {
       return interaction.reply({ content: '❌ Betting is not open right now.', ephemeral: true });
     }
 
+    const userData = getUser(data, betAs.id, betAs.username);
+    const existingBet = data.round.bets[betAs.id];
+    const availableToBet = userData.points + (existingBet ? existingBet.amount : 0);
     const alliance = interaction.options.getString('alliance');
     const amount = interaction.options.getInteger('amount');
 
-    if (amount <= 0) {
-      return interaction.reply({ content: '❌ Bet amount must be positive.', ephemeral: true });
+    if (amount <= 100 && !(availableToBet <= 100)) {
+      return interaction.reply({ content: '❌ Bet amount must be greater than 100.', ephemeral: true });
     }
 
     const targetName = interaction.options.getString('for');
@@ -347,9 +350,7 @@ client.on('interactionCreate', async (interaction) => {
       ? { id: `manual_${targetName.toLowerCase().replace(/\s+/g, '_')}`, username: targetName }
       : { id: user.id, username: displayName };
 
-    const userData = getUser(data, betAs.id, betAs.username);
-    const existingBet = data.round.bets[betAs.id];
-    const availableToBet = userData.points + (existingBet ? existingBet.amount : 0);
+    
 
     if (amount > availableToBet) {
       return interaction.reply({
